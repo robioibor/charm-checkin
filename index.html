@@ -130,7 +130,7 @@
     font-size: 30px;
     font-weight: 700;
   }
-  .vehicle-count-badge .lbl { font-size: 13px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 2px; }
+  .lbl { font-size: 13px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 2px; }
 
   /* Tabs */
   .tabs { display: flex; gap: 8px; margin: 14px 0 16px; }
@@ -346,11 +346,22 @@
           </div>
         </div>
         <div class="card">
+          <h2>Manage Referral Sources</h2>
+          <div id="referral-manage-list"></div>
+          <div class="add-material-form">
+            <div class="field" style="margin-bottom:8px;">
+              <label for="new-referral-name">New referral/marketing source</label>
+              <input type="text" id="new-referral-name" placeholder="e.g. Community Radio Ad">
+            </div>
+            <button class="btn-secondary" style="width:100%;" onclick="addReferralSource()">Add Source</button>
+          </div>
+        </div>
+        <div class="card">
           <h2>Backup</h2>
           <button class="btn-secondary" style="width:100%; margin-bottom:12px;" onclick="exportCSV()">Export CSV</button>
           <button class="btn-danger" id="reset-open-btn" onclick="openResetPanel()">Reset Event (Testing Only)</button>
           <div class="reset-panel hidden" id="reset-panel">
-            <p>This permanently deletes all vehicle entries and event setup on this device. Your fee/material list is kept. This cannot be undone. Type RESET below to confirm.</p>
+            <p>This permanently deletes all vehicle entries and event setup on this device. Your fee/material and referral source lists are kept. This cannot be undone. Type RESET below to confirm.</p>
             <input type="text" id="reset-confirm-input" placeholder="Type RESET" oninput="onResetInputChange()">
             <div class="reset-actions">
               <button class="btn-danger" id="reset-confirm-btn" disabled onclick="doResetEvent()">Permanently Reset Event</button>
@@ -380,28 +391,28 @@
     { id: 'crt', label: 'CRT', price: 15, active: true },
   ];
 
-  // Add new referral/marketing sources to this list as needed.
-  const REFERRAL_SOURCES = [
-    'City/Community – Social Media',
-    'City/Community – Email',
-    'City/Community – Physical Location',
-    'City/Community – Newsletter/Journal',
-    'City/Community – Website',
-    'Friend/Family',
-    'Road Signage',
-    'Search (Google, etc.)',
-    'URA – Email/Newsletter',
-    'URA – Eventbrite',
-    'URA – Other Program',
-    'URA – Social Media',
-    'URA – Website',
-    'Instagram – Better Utah',
-    'Instagram – Recycle with Robi',
-    "Other / Don't know",
+  // Starting referral/marketing sources — teams can add/edit/deactivate more from "Manage Referral Sources".
+  // promptsForDetail marks the one option that reveals the "which program" follow-up field.
+  const DEFAULT_REFERRAL_SOURCES = [
+    { id: 'city-social-media', label: 'City/Community – Social Media', active: true },
+    { id: 'city-email', label: 'City/Community – Email', active: true },
+    { id: 'city-physical-location', label: 'City/Community – Physical Location', active: true },
+    { id: 'city-newsletter', label: 'City/Community – Newsletter/Journal', active: true },
+    { id: 'city-website', label: 'City/Community – Website', active: true },
+    { id: 'friend-family', label: 'Friend/Family', active: true },
+    { id: 'road-signage', label: 'Road Signage', active: true },
+    { id: 'search-engine', label: 'Search (Google, etc.)', active: true },
+    { id: 'ura-email-newsletter', label: 'URA – Email/Newsletter', active: true },
+    { id: 'ura-eventbrite', label: 'URA – Eventbrite', active: true },
+    { id: 'ura-other-program', label: 'URA – Other Program', active: true, promptsForDetail: true },
+    { id: 'ura-social-media', label: 'URA – Social Media', active: true },
+    { id: 'ura-website', label: 'URA – Website', active: true },
+    { id: 'instagram-better-utah', label: 'Instagram – Better Utah', active: true },
+    { id: 'instagram-recycle-with-robi', label: 'Instagram – Recycle with Robi', active: true },
+    { id: 'other-dont-know', label: "Other / Don't know", active: true },
   ];
-  const OTHER_PROGRAM_VALUE = 'URA – Other Program';
 
-  let appState = { eventInfo: null, entries: [], materialTypes: [] };
+  let appState = { eventInfo: null, entries: [], materialTypes: [], referralSources: [] };
   let editingEntryId = null;
   let isEditingSetupOnly = false;
   let lastCountAt = 0;
@@ -418,9 +429,14 @@
   function fmtUsd(n) { return '$' + Number(n || 0).toFixed(2); }
   function fmtUsdWhole(n) { return '$' + Math.round(Number(n || 0)).toString(); }
   function escapeHtml(str) {
-    return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
   function getActiveMaterials() { return appState.materialTypes.filter(m => m.active); }
+  function getActiveReferralSources() { return appState.referralSources.filter(s => s.active); }
+  function getReferralSourceLabel(id) {
+    const s = appState.referralSources.find(x => x.id === id);
+    return s ? s.label : '(Unknown source)';
+  }
   function highlightError(id) {
     const el = document.getElementById(id);
     el.style.outline = '2px solid var(--critical)';
@@ -442,6 +458,21 @@
     if (!appState.materialTypes || !appState.materialTypes.length) {
       appState.materialTypes = DEFAULT_MATERIAL_TYPES.map(m => ({ ...m }));
     }
+    if (!appState.referralSources || !appState.referralSources.length) {
+      appState.referralSources = DEFAULT_REFERRAL_SOURCES.map(s => ({ ...s }));
+    }
+    // Backfill any older entries that stored raw referral text instead of a source id,
+    // so nothing gets lost if the data format changes again in the future.
+    appState.entries.forEach(e => {
+      if (!e.referralSourceId && e.referralSource) {
+        let match = appState.referralSources.find(s => s.label.trim().toLowerCase() === String(e.referralSource).trim().toLowerCase());
+        if (!match) {
+          match = { id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()), label: e.referralSource, active: true };
+          appState.referralSources.push(match);
+        }
+        e.referralSourceId = match.id;
+      }
+    });
   }
 
   function init() {
@@ -453,15 +484,22 @@
     populateReferralOptions();
     populateMaterialRows();
     renderMaterialsManageList();
+    renderReferralManageList();
 
     if (appState.eventInfo) showAppScreen();
     else showSetupScreen(false);
   }
 
-  function populateReferralOptions() {
+  function populateReferralOptions(forceIncludeId) {
     const sel = document.getElementById('input-referral');
+    const active = getActiveReferralSources();
+    let extra = '';
+    if (forceIncludeId && !active.find(s => s.id === forceIncludeId)) {
+      const inactiveSource = appState.referralSources.find(s => s.id === forceIncludeId);
+      if (inactiveSource) extra = `<option value="${inactiveSource.id}">${escapeHtml(inactiveSource.label)} (inactive)</option>`;
+    }
     sel.innerHTML = '<option value="">— Select —</option>' +
-      REFERRAL_SOURCES.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`).join('');
+      active.map(s => `<option value="${s.id}">${escapeHtml(s.label)}</option>`).join('') + extra;
   }
 
   function populateMaterialRows() {
@@ -517,8 +555,8 @@
     if (isEditingSetupOnly) {
       appState.eventInfo = { date, city, partnerOrg };
     } else {
-      // Fee/material list is kept across new events; only event info and entries reset.
-      appState = { eventInfo: { date, city, partnerOrg }, entries: [], materialTypes: appState.materialTypes };
+      // Fee/material and referral-source lists are kept across new events; only event info and entries reset.
+      appState = { eventInfo: { date, city, partnerOrg }, entries: [], materialTypes: appState.materialTypes, referralSources: appState.referralSources };
     }
     saveState();
     showAppScreen();
@@ -546,7 +584,7 @@
     document.getElementById('tab-btn-checkin').classList.toggle('active', isCheckin);
     document.getElementById('tab-btn-totals').classList.toggle('active', !isCheckin);
     document.getElementById('sticky-footer').classList.toggle('hidden', !isCheckin);
-    if (!isCheckin) { renderTotals(); renderMaterialsManageList(); }
+    if (!isCheckin) { renderTotals(); renderMaterialsManageList(); renderReferralManageList(); }
   }
 
   /* ---------- ZIP suggestions ---------- */
@@ -570,8 +608,9 @@
   /* ---------- Check-in form ---------- */
 
   function onReferralChange() {
-    const val = document.getElementById('input-referral').value;
-    document.getElementById('other-program-field').classList.toggle('hidden', val !== OTHER_PROGRAM_VALUE);
+    const id = document.getElementById('input-referral').value;
+    const source = appState.referralSources.find(s => s.id === id);
+    document.getElementById('other-program-field').classList.toggle('hidden', !(source && source.promptsForDetail));
   }
 
   function stepQty(id, delta) {
@@ -601,6 +640,7 @@
 
   function resetCheckinForm() {
     document.getElementById('input-zip').value = '';
+    populateReferralOptions();
     document.getElementById('input-referral').value = '';
     document.getElementById('input-other-program').value = '';
     document.getElementById('other-program-field').classList.add('hidden');
@@ -628,10 +668,11 @@
     const zip = document.getElementById('input-zip').value.trim();
     if (!zip) { highlightError('input-zip'); return; }
 
-    const referralSource = document.getElementById('input-referral').value;
-    if (!referralSource) { highlightError('input-referral'); return; }
+    const referralSourceId = document.getElementById('input-referral').value;
+    if (!referralSourceId) { highlightError('input-referral'); return; }
 
-    const referralOther = referralSource === OTHER_PROGRAM_VALUE
+    const referralSourceObj = appState.referralSources.find(s => s.id === referralSourceId);
+    const referralOther = (referralSourceObj && referralSourceObj.promptsForDetail)
       ? document.getElementById('input-other-program').value.trim()
       : '';
 
@@ -649,7 +690,7 @@
     const totalMoney = Object.values(materials).reduce((sum, m) => sum + m.fee, 0) + generalDonation;
 
     if (existingEntry) {
-      Object.assign(existingEntry, { zip, referralSource, referralOther, materials, generalDonation, totalMoney });
+      Object.assign(existingEntry, { zip, referralSourceId, referralOther, materials, generalDonation, totalMoney });
       editingEntryId = null;
       document.getElementById('edit-banner').classList.add('hidden');
       document.getElementById('count-btn').textContent = 'Count Vehicle';
@@ -658,7 +699,7 @@
       appState.entries.push({
         id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()),
         timestamp: new Date().toISOString(),
-        zip, referralSource, referralOther, materials, generalDonation, totalMoney,
+        zip, referralSourceId, referralOther, materials, generalDonation, totalMoney,
       });
       showToast('Vehicle #' + appState.entries.length + ' counted');
     }
@@ -686,14 +727,15 @@
   function computeTotals() {
     const entries = appState.entries;
     const zipCounts = {};
-    const referralCounts = {};
-    entries.forEach(e => {
-      zipCounts[e.zip] = (zipCounts[e.zip] || 0) + 1;
-      const key = e.referralSource || '(Not specified)';
-      referralCounts[key] = (referralCounts[key] || 0) + 1;
-    });
+    entries.forEach(e => { if (e.zip) zipCounts[e.zip] = (zipCounts[e.zip] || 0) + 1; });
     const zipList = Object.entries(zipCounts).sort((a, b) => b[1] - a[1]);
-    const referralList = Object.entries(referralCounts).sort((a, b) => b[1] - a[1]);
+
+    // Loop over ALL referral sources (active + inactive) so deactivated ones keep their history.
+    const referralCounts = {};
+    entries.forEach(e => { if (e.referralSourceId) referralCounts[e.referralSourceId] = (referralCounts[e.referralSourceId] || 0) + 1; });
+    const referralTotals = appState.referralSources
+      .map(s => ({ id: s.id, label: s.label, active: s.active, count: referralCounts[s.id] || 0 }))
+      .sort((a, b) => b.count - a.count);
 
     // Loop over ALL materials (active + inactive) so deactivated fee types keep their history.
     const materialTotals = {};
@@ -708,7 +750,7 @@
       grandTotal += e.totalMoney || 0;
     });
 
-    return { zipList, referralList, materialTotals, generalTotal, grandTotal };
+    return { zipList, referralTotals, materialTotals, generalTotal, grandTotal };
   }
 
   function renderBars(container, list) {
@@ -728,7 +770,12 @@
     if (t.zipList.length) renderBars(zipEl, t.zipList); else zipEl.innerHTML = '<p class="muted">No entries yet.</p>';
 
     const refEl = document.getElementById('referral-breakdown');
-    if (t.referralList.length) renderBars(refEl, t.referralList); else refEl.innerHTML = '<p class="muted">No entries yet.</p>';
+    const usedReferrals = t.referralTotals.filter(r => r.count > 0);
+    if (usedReferrals.length) {
+      renderBars(refEl, usedReferrals.map(r => [r.label + (r.active ? '' : ' (inactive)'), r.count]));
+    } else {
+      refEl.innerHTML = '<p class="muted">No entries yet.</p>';
+    }
 
     const donEl = document.getElementById('donation-breakdown');
     let donHtml = appState.materialTypes.map(m => {
@@ -755,7 +802,7 @@
         .map(x => `${x.md.qty} ${x.m.label}${x.md.qty > 1 ? 's' : ''}`)
         .join(', ');
       const time = new Date(e.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const referral = e.referralSource || '(Not specified)';
+      const referral = getReferralSourceLabel(e.referralSourceId);
       const referralDetail = e.referralOther ? ` — ${escapeHtml(e.referralOther)}` : '';
       return `
         <div class="entry-item">
@@ -776,7 +823,8 @@
     editingEntryId = id;
 
     document.getElementById('input-zip').value = entry.zip;
-    document.getElementById('input-referral').value = entry.referralSource || '';
+    populateReferralOptions(entry.referralSourceId);
+    document.getElementById('input-referral').value = entry.referralSourceId || '';
     onReferralChange();
     document.getElementById('input-other-program').value = entry.referralOther || '';
     getActiveMaterials().forEach(m => {
@@ -865,11 +913,68 @@
     renderTotals();
   }
 
+  /* ---------- Manage Referral Sources ---------- */
+
+  function renderReferralManageList() {
+    const container = document.getElementById('referral-manage-list');
+    if (!appState.referralSources.length) { container.innerHTML = '<p class="muted">No referral sources yet.</p>'; return; }
+    container.innerHTML = appState.referralSources.map(s => `
+      <div class="material-manage-row">
+        <input type="text" value="${escapeHtml(s.label)}" onchange="updateReferralField('${s.id}','label', this.value)">
+        <label class="active-toggle">
+          <input type="checkbox" ${s.active ? 'checked' : ''} onchange="updateReferralField('${s.id}','active', this.checked)">
+          Active
+        </label>
+      </div>
+    `).join('');
+  }
+
+  function updateReferralField(id, field, value) {
+    const s = appState.referralSources.find(rs => rs.id === id);
+    if (!s) return;
+
+    if (field === 'label') {
+      const trimmed = String(value).trim();
+      if (!trimmed) { renderReferralManageList(); return; }
+      s.label = trimmed;
+    } else if (field === 'active') {
+      s.active = !!value;
+    }
+
+    saveState();
+    populateReferralOptions();
+    renderReferralManageList();
+    renderTotals();
+  }
+
+  function addReferralSource() {
+    const nameInput = document.getElementById('new-referral-name');
+    const label = nameInput.value.trim();
+    if (!label) { alert('Enter a name for the referral source.'); return; }
+
+    appState.referralSources.push({
+      id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()),
+      label, active: true,
+    });
+    saveState();
+    nameInput.value = '';
+    populateReferralOptions();
+    renderReferralManageList();
+    renderTotals();
+  }
+
   /* ---------- CSV export ---------- */
 
   function csvEscape(value) {
     const str = String(value === undefined || value === null ? '' : value);
     return /[",\n]/.test(str) ? '"' + str.replace(/"/g, '""') + '"' : str;
+  }
+
+  // Wraps a numeric ZIP as an Excel/Sheets "text formula" (="02134") so leading zeros survive
+  // being opened in a spreadsheet. Non-numeric input is left as plain text (already safe as-is).
+  function csvZipCell(zip) {
+    const str = String(zip || '');
+    return /^\d+$/.test(str) ? '="' + str + '"' : str;
   }
 
   function exportCSV() {
@@ -879,28 +984,50 @@
     const t = computeTotals();
     const rows = [];
 
-    // --- Event info header ---
-    rows.push([info.city || '']);
-    rows.push([formatEventDateLong(info.date)]);
-    if (info.partnerOrg) rows.push(['Partner: ' + info.partnerOrg]);
+    // --- 1. Event Summary ---
+    rows.push(['Event Summary']);
+    rows.push(['Event Date', formatEventDateLong(info.date)]);
+    rows.push(['City / Location', info.city || '']);
+    rows.push(['Partner Organization', info.partnerOrg || '']);
+    rows.push(['Total Vehicles', appState.entries.length]);
+    rows.push(['Total Donations/Fees Received', fmtUsdWhole(t.grandTotal)]);
     rows.push([]);
 
-    // --- Event summary ---
-    rows.push(['Event Summary']);
-    rows.push(['Category', 'Quantity', 'Amount']);
+    // --- 2. ZIP Code Summary ---
+    rows.push(['ZIP Code Summary']);
+    rows.push(['ZIP Code', 'Vehicle Count']);
+    t.zipList.forEach(([zip, count]) => rows.push([csvZipCell(zip), count]));
+    rows.push(['Total Vehicles', appState.entries.length]);
+    rows.push([]);
+
+    // --- 3. How Attendees Heard About the Event ---
+    rows.push(['How Attendees Heard About the Event']);
+    rows.push(['Referral / Marketing Source', 'Response Count']);
+    const usedReferrals = t.referralTotals.filter(r => r.count > 0);
+    let totalResponses = 0;
+    usedReferrals.forEach(r => {
+      totalResponses += r.count;
+      rows.push([r.label + (r.active ? '' : ' (inactive)'), r.count]);
+    });
+    rows.push(['Total Responses', totalResponses]);
+    rows.push([]);
+
+    // --- 4. Donations and Material Fees ---
+    rows.push(['Donations and Material Fees']);
+    rows.push(['Material', 'Quantity', 'Fee per Item', 'Total Amount']);
     appState.materialTypes.forEach(m => {
       const d = t.materialTotals[m.id];
+      if (!d.qty) return; // only materials actually used during the event
       const label = d.label + (d.active ? '' : ' (inactive)');
-      rows.push([label, d.qty, fmtUsdWhole(d.fee)]);
+      rows.push([label, d.qty, fmtUsdWhole(m.price), fmtUsdWhole(d.fee)]);
     });
-    rows.push(['General URA Donations', '', fmtUsdWhole(t.generalTotal)]);
-    rows.push(['Total Donations/Fees Received', '', fmtUsdWhole(t.grandTotal)]);
-    rows.push(['Total Vehicles', appState.entries.length, '']);
+    rows.push(['General URA Donations', '', '', fmtUsdWhole(t.generalTotal)]);
+    rows.push(['Total Donations/Fees Received', '', '', fmtUsdWhole(t.grandTotal)]);
     rows.push([]);
 
-    // --- Vehicle detail ---
-    rows.push(['Vehicle Detail']);
-    const header = ['Timestamp', 'ZIP Code', 'Referral Source', 'Referral Detail'];
+    // --- 5. Detailed Vehicle Records ---
+    rows.push(['Detailed Vehicle Records']);
+    const header = ['Timestamp', 'ZIP Code', 'How They Heard About the Event', 'Referral Detail'];
     appState.materialTypes.forEach(m => { header.push(m.label + ' Qty', m.label + ' Fee'); });
     header.push('General Donation', 'Total Money Received');
     rows.push(header);
@@ -908,8 +1035,8 @@
     appState.entries.forEach(e => {
       const row = [
         new Date(e.timestamp).toLocaleString(),
-        e.zip,
-        e.referralSource || '',
+        csvZipCell(e.zip),
+        getReferralSourceLabel(e.referralSourceId),
         e.referralOther || '',
       ];
       appState.materialTypes.forEach(m => {
@@ -950,8 +1077,8 @@
     document.getElementById('reset-confirm-btn').disabled = val !== 'RESET';
   }
   function doResetEvent() {
-    // Fee/material list is intentionally preserved across a reset — only event info and entries clear.
-    appState = { eventInfo: null, entries: [], materialTypes: appState.materialTypes };
+    // Fee/material and referral-source lists are intentionally preserved across a reset — only event info and entries clear.
+    appState = { eventInfo: null, entries: [], materialTypes: appState.materialTypes, referralSources: appState.referralSources };
     saveState();
     editingEntryId = null;
     closeResetPanel();
