@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CHaRM Event Dashboard</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page-plane:     #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-1:       #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    .viz-root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page-plane:     #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255,255,255,0.10);
+      --series-1:       #3987e5;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page-plane);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--text-primary);
+  }
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+  header h1 {
+    font-size: 28px;
+    margin: 0 0 4px;
+  }
+  header p {
+    margin: 0 0 32px;
+    color: var(--text-secondary);
+    font-size: 15px;
+  }
+
+  /* Stat tiles */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 40px;
+  }
+  .stat-tile {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 18px 20px;
+  }
+  .stat-tile .label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+  .stat-tile .value {
+    font-size: 26px;
+    font-weight: 600;
+  }
+
+  section { margin-bottom: 40px; }
+  section h2 {
+    font-size: 18px;
+    margin: 0 0 16px;
+  }
+
+  /* Chart */
+  .chart-card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 24px;
+    position: relative;
+  }
+  .bar { fill: var(--series-1); }
+  .bar-hit { fill: transparent; cursor: pointer; }
+  .axis-label { fill: var(--text-muted); font-size: 12px; }
+  .value-label { fill: var(--text-primary); font-size: 12px; font-weight: 600; }
+  .gridline { stroke: var(--gridline); stroke-width: 1; }
+  .baseline { stroke: var(--baseline); stroke-width: 1; }
+
+  .tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--text-primary);
+    color: var(--surface-1);
+    font-size: 12.5px;
+    line-height: 1.5;
+    padding: 8px 10px;
+    border-radius: 6px;
+    opacity: 0;
+    transform: translate(-50%, -100%);
+    white-space: nowrap;
+    transition: opacity 0.1s ease;
+    z-index: 10;
+  }
+  .tooltip strong { display: block; margin-bottom: 2px; }
+
+  /* Table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    font-size: 14px;
+  }
+  th, td {
+    text-align: left;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--gridline);
+  }
+  th {
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  footer {
+    color: var(--text-muted);
+    font-size: 12.5px;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <div class="wrap">
+    <header>
+      <h1>CHaRM Event Dashboard</h1>
+      <p>Sample data for five fictional community recycling collection events.</p>
+    </header>
+
+    <div class="stats" id="stats"></div>
+
+    <section>
+      <h2>Pounds Collected by Event</h2>
+      <div class="chart-card">
+        <svg id="chart" width="100%" viewBox="0 0 900 340" role="img" aria-label="Bar chart of pounds collected per event"></svg>
+        <div class="tooltip" id="tooltip"></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Event Comparison</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Event / City</th>
+            <th>Date</th>
+            <th class="num">Vehicles</th>
+            <th class="num">Pounds Collected</th>
+            <th class="num">Revenue</th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+      <footer>All figures are illustrative sample data, not real event records.</footer>
+    </section>
+  </div>
+</div>
+
+<script>
+  const events = [
+    { name: "Riverside CHaRM",    city: "Riverside, OR",   date: "2026-03-14", vehicles: 312, pounds: 48650, revenue: 6120 },
+    { name: "Lakeview CHaRM",     city: "Lakeview, OR",    date: "2026-04-18", vehicles: 275, pounds: 41200, revenue: 5430 },
+    { name: "Maple Grove CHaRM",  city: "Maple Grove, WA", date: "2026-05-09", vehicles: 398, pounds: 62300, revenue: 7980 },
+    { name: "Cedar Hills CHaRM",  city: "Cedar Hills, OR", date: "2026-06-21", vehicles: 356, pounds: 55100, revenue: 6750 },
+    { name: "Harborview CHaRM",   city: "Harborview, WA",  date: "2026-07-12", vehicles: 289, pounds: 44800, revenue: 5600 },
+  ];
+
+  const fmtInt = n => n.toLocaleString("en-US");
+  const fmtUsd = n => "$" + n.toLocaleString("en-US");
+
+  // Totals for the stat tiles
+  const totals = events.reduce((acc, e) => ({
+    events: acc.events + 1,
+    vehicles: acc.vehicles + e.vehicles,
+    pounds: acc.pounds + e.pounds,
+    revenue: acc.revenue + e.revenue,
+  }), { events: 0, vehicles: 0, pounds: 0, revenue: 0 });
+
+  const statsEl = document.getElementById("stats");
+  const tiles = [
+    { label: "Total Events", value: fmtInt(totals.events) },
+    { label: "Total Vehicles", value: fmtInt(totals.vehicles) },
+    { label: "Total Pounds Collected", value: fmtInt(totals.pounds) + " lbs" },
+    { label: "Total Revenue", value: fmtUsd(totals.revenue) },
+  ];
+  statsEl.innerHTML = tiles.map(t => `
+    <div class="stat-tile">
+      <div class="label">${t.label}</div>
+      <div class="value">${t.value}</div>
+    </div>
+  `).join("");
+
+  // Table rows
+  const tbody = document.getElementById("table-body");
+  tbody.innerHTML = events.map(e => `
+    <tr>
+      <td><strong>${e.name}</strong><br><span style="color:var(--text-secondary)">${e.city}</span></td>
+      <td>${e.date}</td>
+      <td class="num">${fmtInt(e.vehicles)}</td>
+      <td class="num">${fmtInt(e.pounds)} lbs</td>
+      <td class="num">${fmtUsd(e.revenue)}</td>
+    </tr>
+  `).join("");
+
+  // Bar chart, drawn by hand in SVG so no external chart library is needed
+  const svg = document.getElementById("chart");
+  const tooltip = document.getElementById("tooltip");
+  const chartCard = svg.closest(".chart-card");
+
+  const W = 900, H = 340;
+  const marginTop = 20, marginBottom = 50, marginLeft = 50, marginRight = 20;
+  const plotW = W - marginLeft - marginRight;
+  const plotH = H - marginTop - marginBottom;
+  const maxPounds = Math.max(...events.map(e => e.pounds));
+  const yMax = Math.ceil(maxPounds / 10000) * 10000;
+
+  const barSlot = plotW / events.length;
+  const barWidth = 24;
+
+  let svgMarkup = "";
+
+  // Gridlines + y-axis labels at four clean steps
+  const steps = 4;
+  for (let i = 0; i <= steps; i++) {
+    const val = (yMax / steps) * i;
+    const y = marginTop + plotH - (val / yMax) * plotH;
+    svgMarkup += `<line class="gridline" x1="${marginLeft}" x2="${W - marginRight}" y1="${y}" y2="${y}" />`;
+    svgMarkup += `<text class="axis-label" x="${marginLeft - 10}" y="${y + 4}" text-anchor="end">${fmtInt(val)}</text>`;
+  }
+
+  // Baseline
+  const baseY = marginTop + plotH;
+  svgMarkup += `<line class="baseline" x1="${marginLeft}" x2="${W - marginRight}" y1="${baseY}" y2="${baseY}" />`;
+
+  events.forEach((e, i) => {
+    const slotCenter = marginLeft + barSlot * i + barSlot / 2;
+    const barX = slotCenter - barWidth / 2;
+    const barH = (e.pounds / yMax) * plotH;
+    const barY = baseY - barH;
+    const r = 4;
+
+    // Rounded top, square bottom bar, built as a path
+    svgMarkup += `
+      <path class="bar" d="
+        M ${barX} ${barY + r}
+        Q ${barX} ${barY} ${barX + r} ${barY}
+        L ${barX + barWidth - r} ${barY}
+        Q ${barX + barWidth} ${barY} ${barX + barWidth} ${barY + r}
+        L ${barX + barWidth} ${baseY}
+        L ${barX} ${baseY}
+        Z" />
+      <rect class="bar-hit" data-i="${i}" x="${slotCenter - barSlot / 2}" y="${marginTop}" width="${barSlot}" height="${plotH}" />
+      <text class="value-label" x="${slotCenter}" y="${barY - 8}" text-anchor="middle">${fmtInt(e.pounds)}</text>
+      <text class="axis-label" x="${slotCenter}" y="${baseY + 20}" text-anchor="middle">${e.name.replace(" CHaRM", "")}</text>
+    `;
+  });
+
+  svg.innerHTML = svgMarkup;
+
+  svg.querySelectorAll(".bar-hit").forEach(hit => {
+    hit.addEventListener("mousemove", (evt) => {
+      const e = events[Number(hit.dataset.i)];
+      const rect = chartCard.getBoundingClientRect();
+      tooltip.style.left = (evt.clientX - rect.left) + "px";
+      tooltip.style.top = (evt.clientY - rect.top - 12) + "px";
+      tooltip.style.opacity = 1;
+      tooltip.innerHTML = `<strong>${e.name}</strong>${e.city}<br>${fmtInt(e.pounds)} lbs &middot; ${fmtInt(e.vehicles)} vehicles &middot; ${fmtUsd(e.revenue)}`;
+    });
+    hit.addEventListener("mouseleave", () => { tooltip.style.opacity = 0; });
+  });
+</script>
+</body>
+</html>
